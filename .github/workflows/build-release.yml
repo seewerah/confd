@@ -66,6 +66,7 @@ jobs:
       - name: Download `confd`
         uses: actions/download-artifact@v4
         with:
+          # Files will be downloaded to `bin/$name/$name`
           path: bin
 
       - name: Create release
