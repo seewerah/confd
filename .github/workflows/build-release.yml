@@ -70,6 +70,8 @@ jobs:
 
       - run: ls -l
       - run: ls -l bin
+      - run: ls -l bin/*
+      - run: ls -l bin/*/*
 
       - name: Create release
         uses: softprops/action-gh-release@v2
