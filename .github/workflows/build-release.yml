@@ -29,8 +29,10 @@ jobs:
       - name: Set up variables
         run: |
           GITSHA=$(git rev-parse --short HEAD)
+          TAG=${GITHUB_REF#refs/tags/}
+          VERSION=${TAG#v}
           echo GITSHA=$GITSHA >>$GITHUB_ENV
-          echo VERSION=${GITHUB_REF#refs/tags/} >>$GITHUB_ENV
+          echo VERSION=$VERSION >>$GITHUB_ENV
 
       - name: Define the executable name for Linux and macOS
         if: ${{ matrix.os != 'windows' }}
