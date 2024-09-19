@@ -69,10 +69,19 @@ jobs:
           # Files will be downloaded to `bin/$name/$name`
           path: bin
 
+      - name: Fix downloaded `confd` paths
+        working-directory: bin
+        run: |
+          for d in */; do
+            mv -v "$d" tmp
+            mv -v tmp/* .
+            rm -frv tmp
+          done
+
       - name: Create release
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: bin/*/*
+          files: bin/*
 
 # vim:set sw=2 ts=2 et:
