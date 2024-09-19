@@ -34,11 +34,11 @@ jobs:
 
       - name: Define the executable name for Linux and macOS
         if: ${{ matrix.os != 'windows' }}
-        run: echo CONFD=confd-${{ matrix.os }}-${{ matrix.arch }} >>$GITHUB_ENV
+        run: tee -a $GITHUB_ENV <<<CONFD=confd-$VERSION-${{ matrix.os }}-${{ matrix.arch }}
 
       - name: Define the executable name for Windows
         if: ${{ matrix.os == 'windows' }}
-        run: echo CONFD=confd-${{ matrix.os }}-${{ matrix.arch }}.exe >>$GITHUB_ENV
+        run: tee -a $GITHUB_ENV <<<CONFD=confd-$VERSION-${{ matrix.os }}-${{ matrix.arch }}.exe
 
       - name: Build `confd`
         env:
