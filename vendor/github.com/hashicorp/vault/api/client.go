@@ -185,9 +185,6 @@ type Config struct {
 	// CloneToken from parent.
 	CloneToken bool
 
-	// CloneTLSConfig from parent (tls.Config).
-	CloneTLSConfig bool
-
 	// ReadYourWrites ensures isolated read-after-write semantics by
 	// providing discovered cluster replication states in each request.
 	// The shared state is automatically propagated to all Client clones.
@@ -293,14 +290,7 @@ func (c *Config) configureTLS(t *TLSConfig) error {
 	if c.HttpClient == nil {
 		c.HttpClient = DefaultConfig().HttpClient
 	}
-
-	transport, ok := c.HttpClient.Transport.(*http.Transport)
-	if !ok {
-		return fmt.Errorf(
-			"unsupported HTTPClient transport type %T", c.HttpClient.Transport)
-	}
-
-	clientTLSConfig := transport.TLSClientConfig
+	clientTLSConfig := c.HttpClient.Transport.(*http.Transport).TLSClientConfig
 
 	var clientCert tls.Certificate
 	foundClientCert := false
@@ -545,7 +535,7 @@ func (c *Config) ParseAddress(address string) (*url.URL, error) {
 			// be pointing to the protocol used in the application layer and not to
 			// the transport layer. Hence, setting the fields accordingly.
 			u.Scheme = "http"
-			u.Host = "localhost"
+			u.Host = socket
 			u.Path = ""
 		} else {
 			return nil, fmt.Errorf("attempting to specify unix:// address with non-transport transport")
@@ -998,9 +988,7 @@ func (c *Client) Namespace() string {
 func (c *Client) WithNamespace(namespace string) *Client {
 	c2 := *c
 	c2.modifyLock = sync.RWMutex{}
-	c.modifyLock.RLock()
-	c2.headers = c.headersInternal()
-	c.modifyLock.RUnlock()
+	c2.headers = c.Headers()
 	if namespace == "" {
 		c2.ClearNamespace()
 	} else {
@@ -1037,12 +1025,7 @@ func (c *Client) ClearToken() {
 func (c *Client) Headers() http.Header {
 	c.modifyLock.RLock()
 	defer c.modifyLock.RUnlock()
-	return c.headersInternal()
-}
 
-// headersInternal gets the current set of headers used for requests. Must be called
-// with the read modifyLock held.
-func (c *Client) headersInternal() http.Header {
 	if c.headers == nil {
 		return nil
 	}
@@ -1160,26 +1143,6 @@ func (c *Client) ReadYourWrites() bool {
 	return c.config.ReadYourWrites
 }
 
-// SetCloneTLSConfig from parent.
-func (c *Client) SetCloneTLSConfig(clone bool) {
-	c.modifyLock.Lock()
-	defer c.modifyLock.Unlock()
-	c.config.modifyLock.Lock()
-	defer c.config.modifyLock.Unlock()
-
-	c.config.CloneTLSConfig = clone
-}
-
-// CloneTLSConfig gets the configured CloneTLSConfig value.
-func (c *Client) CloneTLSConfig() bool {
-	c.modifyLock.RLock()
-	defer c.modifyLock.RUnlock()
-	c.config.modifyLock.RLock()
-	defer c.config.modifyLock.RUnlock()
-
-	return c.config.CloneTLSConfig
-}
-
 // Clone creates a new client with the same configuration. Note that the same
 // underlying http.Client is used; modifying the client from more than one
 // goroutine at once may not be safe, so modify the client as needed and then
@@ -1190,28 +1153,24 @@ func (c *Client) CloneTLSConfig() bool {
 // the api.Config struct, such as policy override and wrapping function
 // behavior, must currently then be set as desired on the new client.
 func (c *Client) Clone() (*Client, error) {
-	c.modifyLock.RLock()
-	defer c.modifyLock.RUnlock()
-	c.config.modifyLock.RLock()
-	defer c.config.modifyLock.RUnlock()
 	return c.clone(c.config.CloneHeaders)
 }
 
 // CloneWithHeaders creates a new client similar to Clone, with the difference
-// being that the headers are always cloned
+// being that the  headers are always cloned
 func (c *Client) CloneWithHeaders() (*Client, error) {
-	c.modifyLock.RLock()
-	defer c.modifyLock.RUnlock()
-	c.config.modifyLock.RLock()
-	defer c.config.modifyLock.RUnlock()
 	return c.clone(true)
 }
 
 // clone creates a new client, with the headers being cloned based on the
-// passed in cloneheaders boolean.
-// Must be called with the read lock and config read lock held.
+// passed in cloneheaders boolean
 func (c *Client) clone(cloneHeaders bool) (*Client, error) {
+	c.modifyLock.RLock()
+	defer c.modifyLock.RUnlock()
+
 	config := c.config
+	config.modifyLock.RLock()
+	defer config.modifyLock.RUnlock()
 
 	newConfig := &Config{
 		Address:        config.Address,
@@ -1230,18 +1189,13 @@ func (c *Client) clone(cloneHeaders bool) (*Client, error) {
 		CloneToken:     config.CloneToken,
 		ReadYourWrites: config.ReadYourWrites,
 	}
-
-	if config.CloneTLSConfig {
-		newConfig.clientTLSConfig = config.clientTLSConfig
-	}
-
 	client, err := NewClient(newConfig)
 	if err != nil {
 		return nil, err
 	}
 
 	if cloneHeaders {
-		client.SetHeaders(c.headersInternal().Clone())
+		client.SetHeaders(c.Headers().Clone())
 	}
 
 	if config.CloneToken {
@@ -1272,7 +1226,6 @@ func (c *Client) NewRequest(method, requestPath string) *Request {
 	mfaCreds := c.mfaCreds
 	wrappingLookupFunc := c.wrappingLookupFunc
 	policyOverride := c.policyOverride
-	headers := c.headersInternal()
 	c.modifyLock.RUnlock()
 
 	host := addr.Host
@@ -1317,7 +1270,7 @@ func (c *Client) NewRequest(method, requestPath string) *Request {
 		req.WrapTTL = DefaultWrappingLookupFunc(method, lookupPath)
 	}
 
-	req.Headers = headers
+	req.Headers = c.Headers()
 	req.PolicyOverride = policyOverride
 
 	return req
@@ -1327,9 +1280,8 @@ func (c *Client) NewRequest(method, requestPath string) *Request {
 // a Vault server not configured with this client. This is an advanced operation
 // that generally won't need to be called externally.
 //
-// Deprecated: RawRequest exists for historical compatibility and should not be
-// used directly. Use client.Logical().ReadRaw(...) or higher level methods
-// instead.
+// Deprecated: This method should not be used directly. Use higher level
+// methods instead.
 func (c *Client) RawRequest(r *Request) (*Response, error) {
 	return c.RawRequestWithContext(context.Background(), r)
 }
@@ -1338,9 +1290,8 @@ func (c *Client) RawRequest(r *Request) (*Response, error) {
 // a Vault server not configured with this client. This is an advanced operation
 // that generally won't need to be called externally.
 //
-// Deprecated: RawRequestWithContext exists for historical compatibility and
-// should not be used directly. Use client.Logical().ReadRawWithContext(...)
-// or higher level methods instead.
+// Deprecated: This method should not be used directly. Use higher level
+// methods instead.
 func (c *Client) RawRequestWithContext(ctx context.Context, r *Request) (*Response, error) {
 	// Note: we purposefully do not call cancel manually. The reason is
 	// when canceled, the request.Body will EOF when reading due to the way
